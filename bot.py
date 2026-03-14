@@ -2,6 +2,8 @@ import re
 import time
 import queue
 import threading
+import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
 from datetime import datetime, timezone, timedelta
 from requests.exceptions import RequestException, ReadTimeout, ConnectTimeout, SSLError
@@ -780,12 +782,48 @@ def data_api_loop():
             time.sleep(backoff)
 
 
+def start_health_server():
+    port_raw = os.getenv("PORT", "10000")
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 10000
+
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path in ("/", "/health"):
+                body = b"ok"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            return
+
+    try:
+        server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    except Exception as e:
+        print(f"Health server start error: {e}")
+        return
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"Health server listening on 0.0.0.0:{port}")
+
+
 # =========================
 # MAIN
 # =========================
 
 def main():
     print("Бот запускается...")
+
+    start_health_server()
 
     tg_sender_thread = threading.Thread(target=telegram_worker, daemon=True)
     tg_sender_thread.start()
@@ -805,18 +843,6 @@ def main():
     while True:
         time.sleep(60)
 
+
 if __name__ == "__main__":
     main()
-from flask import Flask
-import threading
-
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "Bot is running"
-
-def run_web():
-    app.run(host="0.0.0.0", port=10000)
-
-threading.Thread(target=run_web).start()
